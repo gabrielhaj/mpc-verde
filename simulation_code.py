@@ -1,3 +1,5 @@
+##Simulation code from https://github.com/MMehrez/MPC-and-MHE-implementation-in-MATLAB-using-Casadi/tree/master/workshop_github/Python_Implementation
+
 import numpy as np 
 from numpy import sin, cos, pi
 import matplotlib.pyplot as plt
