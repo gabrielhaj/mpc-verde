@@ -6,7 +6,8 @@ from casadi import sin, cos, pi
 import matplotlib.pyplot as plt
 from mpc_code import Q_theta
 from simulation_code import simulate
-
+import mpctools as mpc
+from mpctools.tools import DiscreteSimulator
 
 
 def DM2Arr(dm):
@@ -274,3 +275,12 @@ if __name__ == '__main__':
 
 simulate(cat_states, cat_controls, times, T, N,
              np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
+
+q = cat_states[:,0,:].T
+w = cat_controls.reshape((85,2))
+w = w[1:,:]
+z = np.append(0,np.arange(0,round(t[-1][0],1),T))
+z = np.append(z,16.6)
+fig = mpc.plots.mpcplot(q,w,z)
+plt.show()
+mpc.plots.showandsave(fig,"my_mpc_code2.pdf")             
