@@ -91,5 +91,4 @@ def simulate(cat_states, cat_controls, t, step_horizon, N, reference, save=False
 
     if save == True:
         sim.save('./animation' + str(time()) +'.gif', writer='ffmpeg', fps=30)
-
     return
