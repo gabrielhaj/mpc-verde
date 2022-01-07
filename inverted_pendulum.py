@@ -1,7 +1,12 @@
+##tentativa de rodar esse exemplo do matlab
+#https://www.mathworks.com/help/mpc/ug/control-of-an-inverted-pendulum-on-a-cart.html
+
 import numpy as np
 import mpctools as mpc
 import mpctools.plots as mpcplots
 import matplotlib.pyplot as plt
+
+#model from matlab example
 Ac =  np.array([[0,0,0,0],[1,-10,0,-20],[0,9.81,0,39.24],[0,0,1,0]])
 Ac = Ac.T
 
