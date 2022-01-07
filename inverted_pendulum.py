@@ -45,7 +45,7 @@ N = {"x": Nx, "u" : Nu, "t" : Nt}
 
 #simulation
 solver = mpc.nmpc(f,l,N,x0,lb,ub,verbosity = 0, isQP = True)
-nsim = 100
+nsim = 20
 t = np.arange(nsim+1)*T
 xcl = np.zeros((Nx,nsim+1))
 xcl[:,0] = x0
@@ -60,9 +60,9 @@ for k in range(nsim):
 xcl[:,nsim] = x0 # Store final state.
 
 fig = mpc.plots.mpcplot(xcl,ucl,t,
-                        timefirst=False)
+                        timefirst=False, xnames = ["x", "x_dot","theta","theta_dot"], unames = ["Force"])
 plt.show()
-#mpcplots.showandsave(fig, "invertedpendulummpctools.pdf")
+mpcplots.showandsave(fig, "invertedpendulummpctools.pdf")
 
 
 

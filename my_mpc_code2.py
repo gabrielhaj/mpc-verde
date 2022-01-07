@@ -281,6 +281,6 @@ w = cat_controls.reshape((85,2))
 w = w[1:,:]
 z = np.append(0,np.arange(0,round(t[-1][0],1),T))
 z = np.append(z,16.6)
-fig = mpc.plots.mpcplot(q,w,z)
+fig = mpc.plots.mpcplot(q,w,z, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
 plt.show()
 mpc.plots.showandsave(fig,"my_mpc_code2.pdf")             

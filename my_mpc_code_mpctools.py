@@ -128,5 +128,5 @@ print('final error: ', ss_error)
 
 simulate(pred3.T, upred3.T, times, Delta, Nt,
              np.array([0, 0, 0, x_target, y_target, theta_target]), save=False)
-fig = mpc.plots.mpcplot(x,u,times)
-mpc.plots.showandsave(fig,"my_mpctools2.pdf")
+fig = mpc.plots.mpcplot(x,u,times, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
+mpc.plots.showandsave(fig,"my_mpctools.pdf")
