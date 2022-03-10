@@ -7,11 +7,13 @@ import matplotlib.pyplot as plt
 from simulation_code import simulate
 import mpctools as mpc
 from mpctools.tools import DiscreteSimulator
+import pandas as pd
 
 
 def DM2Arr(dm):
     return np.array(dm.full())
-# Original shift function
+
+#Numerical time shift function
 def shift_timestep(step_horizon, t0, state_init, u, f):
     f_value = f(state_init, u[:, 0])
     next_state = ca.DM.full(state_init + (step_horizon * f_value))
@@ -23,18 +25,6 @@ def shift_timestep(step_horizon, t0, state_init, u, f):
     )
 
     return t0, next_state, u0    
-
-# # modificado, não funciona
-# def shift_timestep(step_horizon, t0, state_init, u, F):
-#     next_state = ca.DM.full(F(state_init, u[:, 0]))
-
-#     t0 = t0 + step_horizon
-#     u0 = ca.horzcat(
-#         u[:, 1:],
-#         ca.reshape(u[:, -1], -1, 1)
-#     )
-
-#     return t0, next_state, u0    
 
 sim_time = 20
 x_init = 0
@@ -56,10 +46,11 @@ Q_theta = 0.1;
 R1 = 0.5;
 R2 = 0.05;
 
-
+#defining symbolic variables and building the state and input vectors
 x = SX.sym('x');
 y = SX.sym('y');
 theta = SX.sym('theta');
+
 states = ca.vertcat(
     x,
     y,
@@ -74,17 +65,22 @@ controls = ca.vertcat(
     omega
 )
 n_controls = controls.numel();
+
+#Defining the right hand side of the equation
 rhs = ca.vertcat(
     v*cos(theta),
     v*sin(theta),
     omega
 );
-P = ca.SX.sym('P', n_states + n_states)
+#Defining the parameters, controls and states symbolic matrices 
+P = ca.SX.sym('P', n_states + n_states) #The parameters are the initial state and the final state 
 U = ca.SX.sym('U', n_controls, N)
+X = ca.SX.sym('X',n_states,N+1)
 
+#Defining the symbolic function that relates states,controls and rhs
 f = ca.Function('f',[states,controls],[rhs],['x','u'],['rhs'])
 
-X = ca.SX.sym('X',n_states,N+1)
+
 #computation of the symbolic solution
 X[:,0]= P[:n_states]
 for k in range(N):
@@ -93,58 +89,28 @@ for k in range(N):
     f_value = f(st,con)
     st_next = st + f_value*T
     X[:,k+1] = st_next
+
+#ff function gives the predicted horizon for a given initial state 
+#and controls actions over the horizon    
 ff = ca.Function('ff',[U,P],[X])
-# #Integrator to discretize the system - tentiva de mesclar códigos
 
-# int_opts = {
-#     'tf': T/N,
-#     'simplify': True,
-#     'number_of_finite_elements': 4
-# }
-
-# dae = {
-#     'x': states,
-#     'p': controls,
-#     'ode': f(states,controls)
-# }
-
-# intg = integrator('intg','rk',dae,int_opts) 
-# res = intg(x0 = states,p = controls)
-# states_next = res['xf'];
-# #function to symplify api
-# F = ca.Function('F',[states,controls],[states_next],['xk','uk'],['xk1']) 
-# sim = F.mapaccum(N) #funciton to accumulate N steps of integration
-## plotting example
-#x0 = [0,0,0];
-#u = [];
-#for i in range(N): u.append(1);
-#u = np.vstack((u,u))
-#res = sim(x0,u)
-#tgrid = np.linspace(0,T,N+1)
-#tgrid = np.array(tgrid)
-#a = np.array(horzcat(x0,res))
-#for lin in range(a.shape[0]):
-#    plt.plot(tgrid, a[lin, :])
-#plt.show()
-
-#Ocp desing
-
-g = [];
 Q = ca.diagcat(Q_x,Q_y,Q_theta)
 R = ca.diagcat(R1,R2)
+
 obj = 0;
-#X = sim(P[0:3],U)
-#X = ca.horzcat(P[0:3],X)
+#computation of the objective function
 for k in range(N):
     st = X[:,k]
     con = U[:,k]
     obj = obj + ((st-P[n_states:]).T @ Q @ (st-P[n_states:]) + con.T @ R @ con)
-
+#defining the constrain vector
 g = ca.reshape(X,(N+1)*n_states,1)
-
+#defing the optimization variables
 OPT_variables = ca.vertcat(
     U.reshape((-1, 1))
 )
+
+#setting the nlp
 nlp_prob = {
     'f': obj,
     'x': OPT_variables,
@@ -164,6 +130,7 @@ opts = {
 
 solver = ca.nlpsol('solver', 'ipopt', nlp_prob, opts)
 
+#defining the constrains
 lbx = ca.DM.zeros((n_controls*N, 1))
 ubx = ca.DM.zeros((n_controls*N, 1))
 lbx[0: n_controls*N: n_controls] = v_min
@@ -193,6 +160,7 @@ times = np.array([[0]])
 
 ###############################################################################
 
+#Solving the nlp inside the loop
 if __name__ == '__main__':
     main_loop = time()  # return time in sec
     while (ca.norm_2(state_init - state_target) > 1e-1) and (mpc_iter * T < sim_time):
@@ -203,7 +171,6 @@ if __name__ == '__main__':
         )
         # optimization variable current state
         args['x0'] = ca.reshape(u0.T, n_controls*N, 1)
-
         sol = solver(
             x0=args['x0'],
             lbx=args['lbx'],
@@ -212,17 +179,14 @@ if __name__ == '__main__':
             ubg=args['ubg'],
             p=args['p']
         )
-
         u = ca.reshape(sol['x'], n_controls, N)
         X0 = ff(u,args['p'])
-        #X0 = sim(args['p'][0:3],u)
-        
-        
+        #Building the states horizon history
         cat_states = np.dstack((
             cat_states,
             DM2Arr(X0)
         ))
-
+        #Building the control horizon history
         cat_controls = np.vstack((
             cat_controls,
             DM2Arr(u[:, 0])
@@ -231,15 +195,13 @@ if __name__ == '__main__':
             t,
             t0
         ))
-
         t0, state_init, u0 = shift_timestep(T, t0, state_init, u, f)
 
-        # print(X0)
         X0 = ca.horzcat(
             X0[:, :],
             ca.reshape(X0[:, -1], -1, 1)
         )
-
+        
         # xx ...
         t2 = time()
         print(mpc_iter)
@@ -252,12 +214,16 @@ if __name__ == '__main__':
         mpc_iter = mpc_iter + 1
 
     main_loop_time = time()
+    
+    
     ss_error = ca.norm_2(state_init - state_target)
-
+    total_time = main_loop_time - main_loop
+    avg = np.array(times).mean() * 1000
+    table = [ss_error,total_time,avg]
     print('\n\n')
-    print('Total time: ', main_loop_time - main_loop)
-    print('avg iteration time: ', np.array(times).mean() * 1000, 'ms')
-    print('final error: ', ss_error)
+    print('Total time: ', table[1])
+    print('avg iteration time: ',table[2] , 'ms')
+    print('final error: ', table[0])
 
 simulate(cat_states, cat_controls, times, T, N,
              np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
@@ -270,4 +236,10 @@ z = np.append(z,16.6)
 fig = mpc.plots.mpcplot(q,w,z, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
 plt.show()
 mpc.plots.showandsave(fig,"my_mpc_code.pdf")
-             
+
+# p = pd.read_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx") 
+
+# p["single_shooting_euler"] = table
+
+# p.to_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx", sheet_name="Data", merge_cells=False)
+

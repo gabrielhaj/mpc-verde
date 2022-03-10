@@ -7,14 +7,6 @@ import mpctools.plots as mpcplots
 import matplotlib.pyplot as plt
 import pandas as pd
 
-
-#model from matlab example
-Ac =  np.array([[0,0,0,0],[1,-10,0,-20],[0,9.81,0,39.24],[0,0,1,0]])
-Ac = Ac.T
-
-Bc = np.array([[0],[1],[0],[2]])
-
-
 Nx = 4 #states size
 Nu = 1 #controls size
 
@@ -22,38 +14,46 @@ Nu = 1 #controls size
 
 T = 0.01 #sampling time
 Nt = 50 #prediction horizon
+
+#model from matlab example
+Ac =  np.array([[0,0,0,0],[1,-10,0,-20],[0,9.81,0,39.24],[0,0,1,0]])
+Ac = Ac.T
+
+Bc = np.array([[0],[1],[0],[2]])
+
 (A,B) = mpc.util.c2d(Ac,Bc,T) #continuos to discrete 
 def ffunc(x,u):
     return mpc.mtimes(A,x) + mpc.mtimes(B,u)
-    #return mpc.mtimes(Ac,x) + mpc.mtimes(Bc,u)
 f = mpc.getCasadiFunc(ffunc, [Nx,Nu], ["x","u"], "f")
 #making ffunc as casadi function f
 
 #bound on u
-#umax = 2
+
 umax = 200
+
 Dulb = np.tile(-np.inf,(5,1)) #enabling changes on firsts 4 input
 Duub = np.tile(np.inf,(5,1)) #enabling changes on firsts 4 input
 Dub = np.tile(0,(45,1)) #forcing the rest of the horizon to stay the same (Move blocking)
+
 lb = {"u": np.array([-umax]),
     "Du": np.vstack((Dulb,Dub))} #lower bound for control
-#lb = {"x": np.array([-200,-500,-np.pi*100,-np.pi*100])}
+
 ub = {"u": np.array([umax]),
     "Du": np.vstack((Duub,Dub))} #upper bound for control
-#ub = {"x": np.array([200,500,np.pi*100,np.pi*100])}
+
 xt = np.array([10,0,0,0]) #reference values for the states
+
 #Q and R matrices
-#Q = np.diag([1.2,0,1,0])
 Q = np.diag([1.2,0,1,0]) #weight matrix for states
 R1 = 0.01 #weight value for variations on the control input
-#R1 = 100
 
+#stage cost function l
 def lfunc(x,u,du):
-    [x1,x2,x3,x4] = x[:]
+    [x1,x2,x3,x4] = x[:] #x,xdot,theta,thetadot
     return (Q[0,0]*(x1-xt[0]))**2 + (Q[2,2]*(x3))**2  + (R1*du)**2
 largs = ["x","u","Du"]    
 l = mpc.getCasadiFunc(lfunc, [Nx,Nu,Nu], largs)  
-#stage cost function l
+
 
 #intial conditons
 x0 = np.array([0,0,0,0])
@@ -62,7 +62,7 @@ N = {"x": Nx, "u" : Nu, "t" : Nt}
 funcargs = {"l": largs}
 #simulation
 solver = mpc.nmpc(f,l,N,x0,lb,ub,isQP = True,verbosity = 0, uprev = np.array([0]),funcargs = funcargs)
-#isQp = True means quadratic programming problem a.k.a linear and quadratic cost
+#isQp = True means quadratic programming problem a.k.a linear system and quadratic cost
 nsim = 1000 #number of simulations
 t = np.arange(nsim+1)*T #time array
 xcl = np.zeros((Nx,nsim+1)) #states record

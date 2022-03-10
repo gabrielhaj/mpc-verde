@@ -4,10 +4,11 @@ import numpy as np
 from casadi import *
 from casadi import sin, cos, pi
 import matplotlib.pyplot as plt
-from mpc_code_mehrez import Q_theta
+
 from simulation_code import simulate
 import mpctools as mpc
 from mpctools.tools import DiscreteSimulator
+import pandas as pd
 
 
 def DM2Arr(dm):
@@ -154,11 +155,9 @@ for k in range(N):
     Uk = ca.vertcat(w[e+f],w[e+f+1]) #concat velocity "w[e+3]" and angular velocity"w[e+4]""
     # Integrate till the end of the interval
     Fk = F(x0=ca.vertcat(Xk,P[n_states:]), p=Uk)
-    #Fk = F(x0=Pk, p=Uk)
+    
     Xk_end = Fk['xf']
-    #X = ca.horzcat(X,ca.vertcat(Xk)) #não lembro porque dessa linha
-    #Pk[:n_states] = Xk
-    #Po[:n_states] = Xk
+   
     J=J+Fk['qf']
 
     # New NLP variable for state at end of interval
@@ -174,12 +173,6 @@ for k in range(N):
         g   += [Xk_end[a]-Xk[a]]
     lbg += [0, 0, 0]
     ubg += [0, 0, 0]
-
-    # # Add inequality constraint
-    # g += [Xk[0]]
-    # g += [Xk[1]]
-    # lbg += [-ca.inf]
-    # ubg += [ca.inf]
 
     e = e + 2
     f = f + 3
@@ -224,12 +217,7 @@ mpc_iter = 0
 cat_states = DM2Arr(X0)
 cat_controls = DM2Arr(u0[:, 0])
 times = np.array([[0]])
-# X0 = state_init #aux variable
-# X1 = X0 #aux variable
-# mpc_iter = 0
-# cat_states = DM2Arr(ca.repmat(X0,1,N+1)) #variable to store the predicted states
-# cat_controls = DM2Arr(ca.DM.zeros((n_controls))) #variable to store the applied controls
-# times = np.array([[0]])
+
 
 ###############################################################################
 
@@ -312,19 +300,43 @@ if __name__ == '__main__':
     main_loop_time = time()
     ss_error = ca.norm_2(state_init - state_target)
 
+    
+    total_time = main_loop_time - main_loop
+    avg = np.array(times).mean() * 1000
+    table = [ss_error,total_time,avg]
+
     print('\n\n')
     print('Total time: ', main_loop_time - main_loop)
     print('avg iteration time: ', np.array(times).mean() * 1000, 'ms')
     print('final error: ', ss_error)
 
-simulate(cat_states, cat_controls, times, T, N,
-             np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
+# simulate(cat_states, cat_controls, times, T, N,
+#              np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
 
 q = cat_states[:,0,:].T
 w = cat_controls.reshape((85,2))
 w = w[1:,:]
 z = np.append(0,np.arange(0,round(t[-1][0],1),T))
 z = np.append(z,16.6)
-fig = mpc.plots.mpcplot(q,w,z, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
-plt.show()
-mpc.plots.showandsave(fig,"multiple_shooting_casadi.pdf")             
+# fig = mpc.plots.mpcplot(q,w,z, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
+# plt.show()
+# mpc.plots.showandsave(fig,"multiple_shooting_casadi.pdf")             
+
+df = pd.DataFrame({
+    "x": q[:,0],
+    "y": q[:,1],
+    "theta": q[:,2],
+    "v": np.append(w[:,0],w[-1,0]),
+    "w": np.append(w[:,1],w[-1,1]),
+    "t": z
+})
+
+df.to_excel("1exemplo.xlsx", sheet_name="Sheet1")
+
+
+# p = pd.read_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx") 
+
+# p["multiple_shooting"] = table
+# name = ["Erro quadrático","Tempo total", "Tempo médio"]
+# p["Data"] = name
+# p.to_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx", sheet_name="Data", merge_cells=False) 

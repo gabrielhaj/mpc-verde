@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from simulation_code import simulate
 import mpctools as mpc
 from mpctools.tools import DiscreteSimulator
+import pandas as pd
 
 
 def DM2Arr(dm):
@@ -267,19 +268,42 @@ if __name__ == '__main__':
     main_loop_time = time()
     ss_error = ca.norm_2(state_init - state_target)
 
+    ss_error = ca.norm_2(state_init - state_target)
+    total_time = main_loop_time - main_loop
+    avg = np.array(times).mean() * 1000
+    table = [ss_error,total_time,avg]
+
     print('\n\n')
     print('Total time: ', main_loop_time - main_loop)
     print('avg iteration time: ', np.array(times).mean() * 1000, 'ms')
     print('final error: ', ss_error)
 
-simulate(cat_states, cat_controls, times, T, N,
-             np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
+# simulate(cat_states, cat_controls, times, T, N,
+#              np.array([x_init, y_init, theta_init, x_target, y_target, theta_target]), save=False)
 
-# q = cat_states[:,0,:].T
-# w = cat_controls.reshape((85,2))
-# w = w[1:,:]
-# z = np.append(0,np.arange(0,round(t[-1][0],1),T))
-# z = np.append(z,16.6)
+q = cat_states[:,0,:].T
+w = cat_controls.reshape((85,2))
+w = w[1:,:]
+z = np.append(0,np.arange(0,round(t[-1][0],1),T))
+z = np.append(z,16.6)
 # fig = mpc.plots.mpcplot(q,w,z, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
 # plt.show()
-# mpc.plots.showandsave(fig,"my_mpc_code2.pdf")             
+
+df = pd.DataFrame({
+    "x": q[:,0],
+    "y": q[:,1],
+    "theta": q[:,2],
+    "v": np.append(w[:,0],w[-1,0]),
+    "w": np.append(w[:,1],w[-1,1]),
+    "t": z
+})
+
+df.to_excel("2exemplo.xlsx", sheet_name="Sheet1")
+# mpc.plots.showandsave(fig,"my_mpc_code2.pdf") 
+
+#p = pd.read_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx") 
+
+#p["single_shooting_rk4"] = table
+
+#p.to_excel("mpc-euler-rk4-multipleshooting-tools-comparison.xlsx", sheet_name="Data", merge_cells=False) 
+            
