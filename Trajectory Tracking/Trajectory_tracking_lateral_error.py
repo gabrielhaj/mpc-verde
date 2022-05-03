@@ -1,10 +1,8 @@
-from cmath import sqrt
 from time import time
 import mpctools as mpc
 import matplotlib.pyplot as plt
 from mpctools.tools import DiscreteSimulator
 import numpy as np
-from sympy import sqrt_mod
 from simulation_code import simulate
 import casadi as ca
 import pandas as pd
@@ -13,34 +11,39 @@ import pandas as pd
 g = pd.read_csv("lane_change.csv")
 a = g["x"]
 b = g["y"]
+c = g["uref"]
 
 Delta = 0.05; #sampling time
-Nt = 10; #horizon step 
+Nt = 20; #Time horizon  
+Ntu = 3; #Control horizon
 Nx = 3 # 3 states (lateral position, yaw angle and angular position)
 Nu = 1 #1 control (steering angle)
-Q_x = 1
-Q_y = 1
-Q_theta = 1
+Q_y = 20
+Q_phi = 1
+Q_r = 1
 R1 = 1
 Q = np.eye(Nx)
-Q[0,0] = Q_x
-Q[1,1] = Q_y
-Q[2,2] = Q_theta
+Q[0,0] = Q_y
+Q[1,1] = Q_phi
+Q[2,2] = Q_r
 R = R1
-delta_max =20;
+delta_max = 20;
 delta_min = -delta_max;
 
 ar = -23.55
 br = 61.99
-uref = 2
+uref = np.mean(c)
 #model
 Ac = np.array(([0,uref,0],[0,0,1],[0,0,ar]))
 Bc = np.array(([0],[0],[br]))
 
 (A,B) = mpc.util.c2d(Ac,Bc,Delta) #continuos to discrete
-
+def simf(x,u):
+    return mpc.mtimes(Ac,x) + mpc.mtimes(Bc,u)
+fsim = mpc.getCasadiFunc(simf,[Nx,Nu],["x","u"],"fsim")    
 def ffunc(x,u):
     return mpc.mtimes(A,x) + mpc.mtimes(B,u)
+    #return A*x + B*u
 f = mpc.getCasadiFunc(ffunc, [Nx,Nu], ["x","u"], "f")
  
 
@@ -54,21 +57,28 @@ largs = ["x","u","p"]
 l = mpc.getCasadiFunc(lfunc,[Nx,Nu,(Nx+Nu)],largs, funcname = "l") 
 funcargs = {"l": largs}
 
-#bound on delta
-lb = {"u" : np.array([delta_min])}
-ub = {"u" : np.array([delta_max])}
+#Applying the horizon control limit
+Dulb = np.tile(-np.inf,(Ntu,1)) #enabling changes until horizon control limit
+Duub = np.tile(np.inf,(Ntu,1)) 
+Dub = np.tile(0,(Nt-Ntu,1)) #forcing the rest of the horizon to stay the same (Move blocking)
+
+lb = {"u": np.array([delta_min]),
+    "Du": np.vstack((Dulb,Dub))} #lower bound for control
+
+ub = {"u": np.array([delta_max]),
+    "Du": np.vstack((Duub,Dub))} #upper bound for control
 
 #Make optimizers
 
 x0 = np.array([0,0,0])
 N = {"x":Nx, "u":Nu, "t": Nt,"p":(Nx+Nu)}
-solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True)
+solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True,uprev = np.array([0]))
 # u = solver.varsym["u"]
 # x = solver.varsym["x"]
 
 #simulator
 
-model = mpc.DiscreteSimulator(f,Delta,[Nx,Nu], ["x","u"])
+model = mpc.DiscreteSimulator(fsim,Delta,[Nx,Nu], ["x","u"])
 
 #simulate
 
@@ -81,7 +91,7 @@ pred = []
 upred = []
 avgt = np.array([0])
 main_loop = time()  # return time in sec
-par = np.ones((Nx+Nu,Nt,Nsim))
+par = np.zeros((Nx+Nu,Nt,Nsim))
 for t in range(Nsim):
     for k in range(Nt):
             if(t+k > 499):
@@ -164,21 +174,66 @@ avg = np.array(avgt).mean() * 1000
 table = [total_time,avg]
 print('\n\n')
 print('Total time: ', main_loop_time - main_loop)
-pred4 = np.ones((500,11,3))
+pred4 = np.ones((Nsim,Nt+1,3))
 for n in range(Nsim):
     for k in range(Nt):
         pred4[n,k,0] = uref*Delta*(n+k)
         pred4[n,k,1] = pred3[n,k,0]
         pred4[n,k,2] = pred3[n,k,1]
+xp = []
+yp = []
+for n in range(Nsim):
+    xp += [uref*Delta*n]
+    yp += [x[n,0]]
+fig, axs = plt.subplots(3, 2)
+axs[0, 0].plot(times,x[:,0], label ='actual')
+axs[0, 0].plot(times[:-1],par[0,0,:], label ='reference')
+axs[0, 0].set_ylabel("Lateral position")
+axs[0, 0].set_xlabel("t[s]")
+axs[0, 0].legend()
+axs[1, 0].plot(times,x[:,1],label ='actual')
+axs[1, 0].plot(times[:-1],par[1,0,:],label ='reference')
+axs[1, 0].set_ylabel("Yaw angle")
+axs[1, 0].set_xlabel("t[s]")
+axs[1, 0].legend()
+axs[1, 1].plot(times,x[:,2], label ='actual')
+axs[1, 1].plot(times[:-1],par[2,0,:], label ='reference')
+axs[1, 1].set_ylabel("Yaw rate")
+axs[1, 1].set_xlabel("t[s]")
+axs[1, 1].legend()
+axs[0, 1].step(times[:-1],u, label ='actual')
+axs[0, 1].plot(times[:-1],par[3,0,:], label ='reference')
+axs[0, 1].set_ylabel("Steering angle")
+axs[0, 1].set_xlabel("t[s]")
+axs[0, 1].legend()
+axs[2, 0].plot(xp,yp, label = 'actual trajectory')
+axs[2, 0].plot(a,b, label = 'reference trajectory')
+axs[2, 0].set_ylabel("y[m]")
+axs[2, 0].set_xlabel("x[m]")
+axs[2, 0].legend()
+axs[2,1].set_visible(False)
 
+manager = plt.get_current_fig_manager()
+manager.resize(*manager.window.maxsize())
 
-simulate(pred4.T, upred3.T, times, Delta, Nt,
-              np.array([0, 0, 0, 50, 50, 0]), save=True)
+# axs[0, 1].step(times,np.append(u[:,0],u[-1,0]))
+# axs[0, 1].set_ylabel("v[m/s]")
+# axs[0, 1].set_xlabel("t[s]")
+# axs[2, 0].plot(times,x[:,2])
+# axs[2, 0].set_ylabel("theta[rad]")
+# axs[2, 0].set_xlabel("t[s]")    
+#plt.plot(times,x[:,0])
+#plt.plot(times[:-1],par[0,0,:])
+plt.show()
+plt.savefig(fname = 'LTI.png',bbox_inches='tight')
+#simulate(pred4.T, upred3.T, times, Delta, Nt,
+#              np.array([0, 0, 0, 50, 50, 0]), save=False)
 
-fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle", "Angular velocity"], unames= ["Steering angle"])
+#fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle", "Angular velocity"], unames= ["Steering angle"])
 #plt.show()
 #mpc.plots.showandsave(fig,"my_mpctools.pdf")
 # simulate(pred3.T, upred3.T, times, Delta, Nt,
 #              np.array([0, 0, 0, x_target, y_target, theta_target]), save=False)
 #fig = mpc.plots.mpcplot(x,u,times, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
-mpc.plots.showandsave(fig,"verde_trajectory_tracking.pdf")
+
+#mpc.plots.showandsave(fig,"verde_trajectory_tracking.pdf")

@@ -16,8 +16,9 @@ yref = g["y"]
 vref = g["uref"]
 
 Delta = 0.05; #sampling time
-Nt = 10; #horizon step 
-Nx = 4 # 3 states (lateral position, yaw angle, lateral velocity and angular velocity)
+Nt = 100; #time horizon 
+Ntu = 100 #Control horizon
+Nx = 4 # 4 states (lateral position, yaw angle, lateral velocity and angular velocity)
 Nu = 1 #1 control (steering angle)
 Q_y = 1
 Q_phi = 1
@@ -53,12 +54,16 @@ B41 = 2*Ca*a/Jz
 Ac = np.array(([0,uref,1,0],[0,0,0,1],[0,0,A33,A34],[0,0,A43,A44]))
 Bc = np.array(([0],[0],[B31],[B41]))
 
+def fcfunc(x,u):
+    return mpc.mtimes(Ac,x) + mpc.mtimes(Bc,u)
+fc = mpc.getCasadiFunc(fcfunc, [Nx,Nu], ["x","u"], "f") 
+
 (A,B) = mpc.util.c2d(Ac,Bc,Delta) #continuos to discrete
 
 def ffunc(x,u):
     return mpc.mtimes(A,x) + mpc.mtimes(B,u)
 f = mpc.getCasadiFunc(ffunc, [Nx,Nu], ["x","u"], "f")
- 
+
 
 #target
 p = np.zeros((Nt,(Nx+Nu))) #Nt lines, Nx+Nu columms
@@ -70,21 +75,29 @@ largs = ["x","u","p"]
 l = mpc.getCasadiFunc(lfunc,[Nx,Nu,(Nx+Nu)],largs, funcname = "l") 
 funcargs = {"l": largs}
 
-#bound on delta
-lb = {"u" : np.array([delta_min])}
-ub = {"u" : np.array([delta_max])}
+#Applying the horizon control limit
+Dulb = np.tile(-np.inf,(Ntu,1)) #enabling changes until horizon control limit
+Duub = np.tile(np.inf,(Ntu,1)) 
+Dub = np.tile(0,(Nt-Ntu,1)) #forcing the rest of the horizon to stay the same (Move blocking)
+
+lb = {"u": np.array([delta_min]),
+    "Du": np.vstack((Dulb,Dub))} #lower bound for control
+
+ub = {"u": np.array([delta_max]),
+    "Du": np.vstack((Duub,Dub))} #upper bound for control
+
 
 #Make optimizers
 
 x0 = np.array([0,0,0,0])
 N = {"x":Nx, "u":Nu, "t": Nt,"p":(Nx+Nu)}
-solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True)
+solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True, uprev = np.array([0]))
 # u = solver.varsym["u"]
 # x = solver.varsym["x"]
 
 #simulator
 
-model = mpc.DiscreteSimulator(f,Delta,[Nx,Nu], ["x","u"])
+model = mpc.DiscreteSimulator(fc,Delta,[Nx,Nu], ["x","u"])
 
 #simulate
 
@@ -97,7 +110,7 @@ pred = []
 upred = []
 avgt = np.array([0])
 main_loop = time()  # return time in sec
-par = np.ones((Nx+Nu,Nt,Nsim))
+par = np.zeros((Nx+Nu,Nt,Nsim))
 veclim = 499
 for t in range(Nsim):
     for k in range(Nt):
@@ -184,7 +197,7 @@ avg = np.array(avgt).mean() * 1000
 table = [total_time,avg]
 print('\n\n')
 print('Total time: ', main_loop_time - main_loop)
-pred4 = np.ones((500,11,3))
+pred4 = np.ones((Nsim,Nt+1,Nx))
 for n in range(Nsim):
     for k in range(Nt):
         pred4[n,k,0] = uref*Delta*(n+k)
@@ -192,13 +205,15 @@ for n in range(Nsim):
         pred4[n,k,2] = pred3[n,k,1]
 
 
-simulate(pred4.T, upred3.T, times, Delta, Nt,
-              np.array([0, 0, 0, 50, 50, 0]), save=True)
+# simulate(pred4.T, upred3.T, times, Delta, Nt,
+#               np.array([0, 0, 0, 50, 50, 0]), save=True)
 
-#fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle", "Angular velocity"], unames= ["Steering angle"])
-#plt.show()
+# a=0
+
+fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle","Lateral velocity", "Angular velocity"], unames= ["Steering angle"])
+plt.show()
 #mpc.plots.showandsave(fig,"my_mpctools.pdf")
 # simulate(pred3.T, upred3.T, times, Delta, Nt,
 #              np.array([0, 0, 0, x_target, y_target, theta_target]), save=False)
 #fig = mpc.plots.mpcplot(x,u,times, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
-mpc.plots.showandsave(fig,"verde_trajectory_tracking.pdf")
+
