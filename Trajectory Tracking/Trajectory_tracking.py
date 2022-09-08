@@ -18,7 +18,7 @@ rob_dim = 0.3
 Nx = 3
 Nu = 2
 Q_x = 1
-Q_y = 5
+Q_y = 1
 Q_theta = 0.1
 R1 = 0.5
 R2 = 0.05
@@ -164,35 +164,35 @@ print('Total time: ', main_loop_time - main_loop)
 # plt.show()
 # mpc.plots.showandsave(fig,"Circular_Trajectory_Trakcing.pdf")
 
-plt.plot(x[:,0],x[:,1], label = 'actual trajectory')
-plt.plot(np.cos(0.1*times),np.sin(0.1*times), linestyle=('dashed'),label ='reference trajectory')
-plt.xlabel("x[m]")
-plt.ylabel("y[m]")
-plt.legend(loc='upper left')
-plt.savefig('circular1.png')
-plt.show()
-
-
-# fig, axs = plt.subplots(4, 2)
-# axs[0, 0].plot(times,x[:,0])
-# axs[0, 0].set_ylabel("x[m]")
-# axs[0, 0].set_xlabel("t[s]")
-# axs[1, 0].plot(times,x[:,1])
-# axs[1, 0].set_ylabel("y[m]")
-# axs[1, 0].set_xlabel("t[s]")
-# axs[0, 1].step(times,np.append(u[:,0],u[-1,0]))
-# axs[0, 1].set_ylabel("v[m/s]")
-# axs[0, 1].set_xlabel("t[s]")
-# axs[2, 0].plot(times,x[:,2])
-# axs[2, 0].set_ylabel("theta[rad]")
-# axs[2, 0].set_xlabel("t[s]")
-# axs[1,1].step(times,np.append(u[:,1],u[-1,1]))
-# axs[1, 1].set_ylabel("w[rad/s]")
-# axs[1, 1].set_xlabel("t[s]")
-# axs[2,1].set_visible(False)
-# axs[3,0].set_visible(False)
-# axs[3,1].set_visible(False)
-
-
+# plt.plot(x[:,0],x[:,1], label = 'trajetória realizada')
+# plt.plot(np.cos(0.1*times),np.sin(0.1*times), linestyle=('dashed'),label ='trajetória de referência')
+# plt.xlabel("x[m]")
+# plt.ylabel("y[m]")
+# plt.legend(loc='upper left')
+# plt.savefig('circular1.png')
 # plt.show()
+
+
+fig, axs = plt.subplots(4, 2)
+axs[0, 0].plot(times,x[:,0])
+axs[0, 0].set_ylabel("x[m]")
+axs[0, 0].set_xlabel("t[s]")
+axs[1, 0].plot(times,x[:,1])
+axs[1, 0].set_ylabel("y[m]")
+axs[1, 0].set_xlabel("t[s]")
+axs[0, 1].step(times,np.append(u[:,0],u[-1,0]))
+axs[0, 1].set_ylabel("v[m/s]")
+axs[0, 1].set_xlabel("t[s]")
+axs[2, 0].plot(times,x[:,2])
+axs[2, 0].set_ylabel("theta[rad]")
+axs[2, 0].set_xlabel("t[s]")
+axs[1,1].step(times,np.append(u[:,1],u[-1,1]))
+axs[1, 1].set_ylabel("w[rad/s]")
+axs[1, 1].set_xlabel("t[s]")
+axs[2,1].set_visible(False)
+axs[3,0].set_visible(False)
+axs[3,1].set_visible(False)
+
+
+plt.show()
 # mpcplots.showandsave(fig, "Trajectoru.png")

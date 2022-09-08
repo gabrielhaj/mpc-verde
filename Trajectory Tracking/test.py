@@ -1,3 +1,4 @@
+from ast import Del
 from cmath import sqrt
 from time import time
 import mpctools as mpc
@@ -11,45 +12,46 @@ import pandas as pd
 
 
 g = pd.read_csv("lane_change.csv")
-xref = g["x"]
-yref = g["y"]
-vref = g["uref"]
+a = g["x"]
+b = g["y"]
+c = g["uref"]
 
+L = 3.5
 Delta = 0.05; #sampling time
-Nt = 10; #time horizon 
-Ntu = 10 #Control horizon
-Nx = 4 # 4 states (lateral position, yaw angle, velocity and angular velocity)
+Nt = 20; #time horizon 
+Ntu = 3; #control horizon
+Nx = 3 # 3 states (lateral position, yaw angle and angular velocity)
 Nu = 1 #1 control (steering angle)
-Q_y = 1
-Q_phi = 1
-Q_v = 1
-Q_r = 1
-R1 = 1
-Q = np.eye(Nx)
-Q[0,0] = Q_y
-Q[1,1] = Q_phi
-Q[2,2] = Q_v
-Q[3,3] = Q_r
-R = R1
+lambda2 = 1.75 #lambda2 (ye)
+lambda3 = 2.5 #lambda3 (phie)
+lambda1 = 2.5 #lambda1 (v-vdes)
+R = 10 #(z = tan(delta)-L*kappa)
 delta_max = 20;
 delta_min = -delta_max;
 
-m = 1200
-a =1.5
-b = 2
-Ca = 55000
-Jz = 1350
 ar = -23.55
 br = 61.99
-
-
+uref = 2
 
 #target
 p = np.zeros((Nt,(Nx+Nu))) #Nt lines, Nx+Nu columms
 
+
+#Make optimizers
+
+# u = solver.varsym["u"]
+# x = solver.varsym["x"]
+
 #stage cost
 def lfunc(x,u,p):
-    return (x-p[:Nx]).T@Q@(x-p[:Nx]) + R*(u-p[Nx:Nu+Nx])**2
+    [y,phi,r] = x[:Nx]
+    [delta] = u
+    [yt,phit,kappat] = p[:Nx]
+    [vdes] = p[Nx:Nx+Nu]
+    R = 1/kappat
+    vel = r*R
+    z = np.tan(delta) - L*kappat
+    return lambda2*(y-yt)**2 + lambda3*(phi-phit)**2 + lambda1*(vel-vdes)**2 + R*z**2
 largs = ["x","u","p"]     
 l = mpc.getCasadiFunc(lfunc,[Nx,Nu,(Nx+Nu)],largs, funcname = "l") 
 funcargs = {"l": largs}
@@ -64,104 +66,75 @@ lb = {"u": np.array([delta_min]),
 
 ub = {"u": np.array([delta_max]),
     "Du": np.vstack((Duub,Dub))} #upper bound for control
-
-
-#Make optimizers
-
-x0 = np.array([0,0,0,0])
 N = {"x":Nx, "u":Nu, "t": Nt,"p":(Nx+Nu)}
-
-# u = solver.varsym["u"]
-# x = solver.varsym["x"]
-
-
-
 #simulate
 
 Nsim = 500
 times = Delta*Nsim*np.linspace(0,1,Nsim+1)
 x = np.zeros((Nsim+1,Nx))
-x[0,:] = x0
+x[0,:] = [0,0,0]
+x0 = x[0,:]
 u = np.zeros((Nsim,Nu))
 pred = []
 upred = []
 avgt = np.array([0])
 main_loop = time()  # return time in sec
 par = np.zeros((Nx+Nu,Nt,Nsim))
-veclim = 499
 for t in range(Nsim):
     for k in range(Nt):
-            if(t+k > veclim):
-                p[k,0] = yref[veclim] #y_ref
-                p[k,1] = np.arctan2(yref[veclim],xref[veclim]) #phi_ref
-                p[k,2] = vref[veclim]
+            if(t+k > Nsim-1):
+                p[k,0] = b[Nsim-1] #y_ref
+                p[k,1] = np.arctan2(b[Nsim-1]-b[Nsim-2],a[Nsim-1]-a[Nsim-2]) #phi_ref
+            elif(t + k == 0):
+                p[k,0] = b[k+t] #y_ref
+                p[k,1] = 0 #phi_ref
             else:
-                p[k,0] = yref[k+t] #y_ref
-                p[k,1] = np.arctan2(yref[k+t],xref[k+t]) #phi_ref
-                p[k,2] = vref[k+t] #vref
+                p[k,0] = b[k+t] #y_ref
+                p[k,1] = np.arctan2(b[k+t]-b[k+t-1],a[k+t]-a[k+t-1]) #phi_ref
             if(t+k < 2):
-                phi_ref_plus = np.arctan2(yref[k+1+t],xref[k+1+t])
-                v_ref_plus = vref[k+t+1]
-                v_dot = (v_ref_plus - p[k,2])/Delta #vrefdot
-                p[k,3] = (phi_ref_plus - p[k,1])/Delta  #r_ref = (phi_ref+ - phi_ref)/Delta 
-                p[k,4] = (v_dot - A33*p[k,2]-A34*p[k,3])/B31
-            elif(t+k > 497):
-                p[k,3] = (p[k,1] - par[1,k,t-1])/Delta  #r_ref = (phi_ref - phi_ref-)/Delta 
-                p[k,4] = (v_dot - A33*p[k,2]-A34*p[k,3])/B31
+                p[k,3] = 1
+                p[k,2] = c[t+k]
+            elif(t+k > Nsim-2):
+                p[k,3] = p[k-1,3]
+                p[k,2] = c[Nsim-1]
             else:
-                phi_ref_plus = np.arctan2(yref[k+1+t],xref[k+1+t])
-                p[k,3] = (phi_ref_plus - par[1,k,t-1])/(2*Delta)  #r_ref = (phi_ref+ - phi_ref-)/2*Delta
-                #delta_ref = (d/dx(r_ref) - ar*r_ref)/br
-                p[k,4] = (v_dot - A33*p[k,2]-A34*p[k,3])/B31 
+                ddx = (a[k+t-1] -2*a[k+t] + a[k+t+1])/Delta**2
+                ddy = (b[k+t-1] -2*b[k+t] + b[k+t+1])/Delta**2    
+                p[k,3] = np.linalg.norm(np.array([ddx,ddy]))
+                p[k,2] = c[t+k]                
             par[:,k,t] = p[k,:]
+
 for t in range(Nsim):
-
-    A33 = -4*Ca/(m*vref[t])
-    A34 = (2*Ca*(b-a)/m*vref[t]) - vref[t]
-    A43 = 2*Ca*((b-a)/(Jz*vref[t]))
-    A44 = -2*Ca*(a**2 + b**2)/(Jz*vref[t])
-    B31 = 2*Ca/m
-    B41 = 2*Ca*a/Jz
-
     #model
-    Ac = np.array(([0,vref[t],1,0],[0,0,0,1],[0,0,A33,A34],[0,0,A43,A44]))
-    Bc = np.array(([0],[0],[B31],[B41]))
-
-    def fcfunc(x,u):
-        return mpc.mtimes(Ac,x) + mpc.mtimes(Bc,u)
-    fc = mpc.getCasadiFunc(fcfunc, [Nx,Nu], ["x","u"], "f") 
+    Ac = np.array(([0,c[t],0],[0,0,1],[0,0,ar]))
+    Bc = np.array(([0],[0],[br]))
 
     (A,B) = mpc.util.c2d(Ac,Bc,Delta) #continuos to discrete
-
+    def simf(x,u):
+        return mpc.mtimes(Ac,x) + mpc.mtimes(Bc,u)
+    fsim = mpc.getCasadiFunc(simf,[Nx,Nu],["x","u"],"fsim")    
     def ffunc(x,u):
         return mpc.mtimes(A,x) + mpc.mtimes(B,u)
+        #return A*x + B*u
     f = mpc.getCasadiFunc(ffunc, [Nx,Nu], ["x","u"], "f")
-
+    
     #controlador
-    solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True, uprev = np.array([0]))
+    solver = mpc.nmpc(f, N = N, verbosity=0, l=l,x0 =x0,lb = lb, ub = ub,p = p,funcargs= funcargs, inferargs= True,uprev = np.array([0]))
 
     #simulator
-
-    model = mpc.DiscreteSimulator(fc,Delta,[Nx,Nu], ["x","u"])
-
-    # Fix initial state.
-    
-    #<<ENDCHUNK>>    
+    model = mpc.DiscreteSimulator(fsim,Delta,[Nx,Nu], ["x","u"])
     
     # Solve nlp.
     t1 = time()
-    for k in range(Nt):
+    for k in range(Nt): #passing parameters along the horizon control
         solver.par["p",k] = par[:,k,t] #trajectory is the parameter "p"  
-    solver.solve()
-    
-    
-    #<<ENDCHUNK>>    
+
+    solver.solve() #solving
     
     # Print stats.
     print("%d: %s" % (t,solver.stats["status"]))
     solver.saveguess()
-    solver.fixvar("x",0,solver.var["x",1])
-
+    solver.fixvar("x",0,solver.var["x",1]) #x[k+1] <- x[k]
     u[t,:] = np.array(solver.var["u",0,:]).flatten()
     
     #predicted trajectories
@@ -170,7 +143,7 @@ for t in range(Nsim):
     
     # Simulate.
     x[t+1,:] = model.sim(x[t,:],u[t,:])
-    x0 = x[t+1,:]
+    x0 = x[t+1,:] #build vector x
     t2 = time()
     avgt = np.vstack((
         avgt,
@@ -204,20 +177,19 @@ avg = np.array(avgt).mean() * 1000
 table = [total_time,avg]
 print('\n\n')
 print('Total time: ', main_loop_time - main_loop)
-pred4 = np.ones((Nsim,Nt+1,Nx))
+pred4 = np.ones((Nsim,Nt+1,3))
 for n in range(Nsim):
     for k in range(Nt):
-        pred4[n,k,0] = vref[k]*Delta*(n+k)
+        pred4[n,k,0] = uref*Delta*(n+k)
         pred4[n,k,1] = pred3[n,k,0]
         pred4[n,k,2] = pred3[n,k,1]
-
 xz = []
 yz = []
 for n in range(Nsim):
     if(n == 0):
         xz += [0]
     else:        
-        xz += [xz[n-1] + x[n,2]*np.cos(x[n,1])*Delta]
+        xz += [xz[n-1] + c[n]*np.cos(x[n,1])*Delta]
     yz += [x[n,0]]
 fig, axs = plt.subplots(3, 2)
 axs[0, 0].plot(times,x[:,0], label ='actual')
@@ -231,12 +203,10 @@ axs[1, 0].set_ylabel("Yaw angle")
 axs[1, 0].set_xlabel("t[s]")
 axs[1, 0].legend()
 axs[1, 1].plot(times,x[:,2], label ='actual')
-axs[1, 1].plot(times[:-1],par[2,0,:], label ='reference')
 axs[1, 1].set_ylabel("Yaw rate")
 axs[1, 1].set_xlabel("t[s]")
 axs[1, 1].legend()
 axs[0, 1].step(times[:-1],u, label ='actual')
-axs[0, 1].plot(times[:-1],par[3,0,:], label ='reference')
 axs[0, 1].set_ylabel("Steering angle")
 axs[0, 1].set_xlabel("t[s]")
 axs[0, 1].legend()
@@ -247,15 +217,16 @@ axs[2, 0].set_xlabel("x[m]")
 axs[2, 0].legend()
 axs[2,1].set_visible(False)
 plt.show()
-# simulate(pred4.T, upred3.T, times, Delta, Nt,
-#               np.array([0, 0, 0, 50, 50, 0]), save=True)
+plt.savefig(fname = 'ltv.png', orientation = 'landscape')
 
-# a=0
+#simulate(pred4.T, upred3.T, times, Delta, Nt,
+#              np.array([0, 0, 0, 50, 50, 0]), save=False)
 
-fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle","Lateral velocity", "Angular velocity"], unames= ["Steering angle"])
-plt.show()
+#fig = mpc.plots.mpcplot(x,u,times, xnames = ["Lateral Positon","Yaw Angle", "Angular velocity"], unames= ["Steering angle"])
+#plt.show()
 #mpc.plots.showandsave(fig,"my_mpctools.pdf")
 # simulate(pred3.T, upred3.T, times, Delta, Nt,
 #              np.array([0, 0, 0, x_target, y_target, theta_target]), save=False)
 #fig = mpc.plots.mpcplot(x,u,times, xnames = ["x Position","y Position", "Angular Displacement"], unames= ["Velocity","Angular Velocity"])
 
+#mpc.plots.showandsave(fig,"verde_trajectory_tracking.pdf")

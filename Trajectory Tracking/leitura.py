@@ -11,29 +11,29 @@ import casadi as ca
 import pandas as pd
 
 
-g = pd.read_csv("lane_change.csv")
+g = pd.read_csv("traj5.csv")
 a = g["x"]
 b = g["y"]
 c = g["uref"]
-#a = a[:700]
-#b = b[:700]
-#c = c[:700]
-dist = 0;
+a = np.array(a[500:1000])
+b = np.array(b[500:1000])
+c = np.array(c[500:1000])
+
 Delta = 0.05; #sampling time
 Nt = 5; #time horizon 
 Ntu = 1; #control horizon
 Nx = 3 # 3 states (lateral position, yaw angle and angular position)
 Nu = 1 #1 control (steering angle)
 Q_y = 5
-Q_theta = 0
+Q_theta = 10
 Q_thetaponto = 0
-R = 0
+R = 0.01
 Q = np.eye(Nx)
 Q[0,0] = Q_y
 Q[1,1] = Q_theta
 Q[2,2] = Q_thetaponto
 R1 = 0
-delta_max = 0.3491;
+delta_max = np.inf;
 delta_min = -delta_max;
 
 ar = -23.55
@@ -72,7 +72,7 @@ N = {"x":Nx, "u":Nu, "t": Nt,"p":(Nx+Nu)}
 Nsim = a.size
 
 x = np.zeros((Nsim+1,Nx))
-x[0,:] = [0,0,0]
+x[0,:] = [b[0],0,0]
 x0 = x[0,:]
 u = np.zeros((Nsim,Nu))
 pred = []
@@ -95,15 +95,23 @@ for t in range(Nsim):
             p[k, 0] = b[Nsim-1]  # y_ref
             p[k, 1] = np.arctan2(b[Nsim-1]-b[Nsim-2],
                                  a[Nsim-1]-a[Nsim-2])  # phi_ref
+            if(p[k,1]<0):
+                p[k,1] = p[k,1] + 2*np.pi
         elif(t + k == 0):
             p[k, 0] = b[k+t]  # y_ref
             p[k, 1] = 0  # phi_ref
         else:
             p[k, 0] = b[k+t]  # y_ref
             p[k, 1] = np.arctan2(b[k+t]-b[k+t-1], a[k+t]-a[k+t-1])  # phi_ref
+            if(p[k,1]<0):
+                p[k,1] = p[k,1] + 2*np.pi
         if(t+k < 2):
             phi_ref_plus = np.arctan2(b[k+1+t]-b[k+t], a[k+1+t]-a[k+t])
+            if(phi_ref_plus < 0):
+                phi_ref_plus = phi_ref_plus + 2*np.pi
             phi_ref_plus2 = np.arctan2(b[k+2+t]-b[k+1+t], a[k+2+t]-a[k+1+t])
+            if(phi_ref_plus2 < 0):
+                phi_ref_plus2 = phi_ref_plus2 + 2*np.pi
             # r_ref = (phi_ref+ - phi_ref)/Delta
             p[k, 2] = (phi_ref_plus - p[k, 1])/Delta
             p[k, 3] = (((phi_ref_plus2 - 2*phi_ref_plus +
@@ -115,6 +123,8 @@ for t in range(Nsim):
                 ((p[k, 1] - 2*par[1, k, t-1] + par[1, k-1, t-1])/Delta**2) - ar*p[k, 2])/br
         else:
             phi_ref_plus = np.arctan2(b[k+1+t]-b[k+t], a[k+1+t]-a[k+t])
+            if(phi_ref_plus < 0):
+                phi_ref_plus = phi_ref_plus + 2*np.pi
             # r_ref = (phi_ref+ - phi_ref-)/2*Delta
             p[k, 2] = (phi_ref_plus - par[1, k, t-1])/(2*Delta)
             #delta_ref = (d/dx(r_ref) - ar*r_ref)/br
@@ -122,9 +132,12 @@ for t in range(Nsim):
                 ((phi_ref_plus - 2*p[k, 1] + par[1, k, t-1])/Delta**2) - ar*p[k, 2])/br
         par[:, k, t] = p[k, :]
     #model
-    
-    Ac = np.array(([0, c[t], 0], [0, 0, 1], [0, 0, ar]))
-    #Ac = np.array(([0, c[t]*np.cos(par[1,0,t]), 0], [0, 0, 1], [0, 0, ar]))
+    if(t == 0):
+        xz += [a[0]]
+    else:        
+        xz += [xz[t-1] + c[t]*np.cos(x[t,1])*Delta]
+    yz += [x[t,0]]
+    Ac = np.array(([0, c[t]*par[1,0,t], 0], [0, 0, 1], [0, 0, ar]))
     Bc = np.array(([0], [0], [br]))
 
     (A, B) = mpc.util.c2d(Ac, Bc, Delta)  # continuos to discrete
@@ -170,19 +183,13 @@ for t in range(Nsim):
         avgt,
         t2-t1
     ))
-    if(t == 0):
-        xz += [0]
-    else:        
-        xz += [xz[t-1] + c[t]*np.cos(x[t,1])*Delta]
-        #xz += [xz[t-1] + c[t]*Delta]
-    yz += [x[t,0]]
     mean_y = mean_y + ((x[t, 0]-par[0, 0, t])**2)/Nsim
     mean_phi = mean_phi + ((x[t, 1]-par[1, 0, t])**2)/Nsim
     mean_r = mean_r + ((x[t, 2]-par[2, 0, t])**2)/Nsim
     mean_delta = mean_delta + ((u[t]-par[3, 0, t])**2)/Nsim
     traj = np.array([xz,yz])
     traje = np.array([a,b])
-    dist = dist + np.linalg.norm(traj[:,t]-traje[:,t])/Nsim
+    dist = np.linalg.norm(traj[:,t]-traje[:,t])
     mse = mse + dist/(t+1)
     if(max_x < abs(dist)):
         max_x = abs(dist)
@@ -282,7 +289,6 @@ axs[1, 1].legend()
 axs[2,1].set_visible(False)
 fig.suptitle(f"Nt = %d, Q_y = %d, Q_phi = %d" %(Nt,Q_y,Q_theta))
 print(mse)
-print(dist)
 print(max_x)
 plt.show()
 plt.savefig(fname = 'ltv.png', orientation = 'landscape')

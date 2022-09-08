@@ -1,4 +1,5 @@
 from time import time
+from tkinter import NS
 import mpctools as mpc
 import matplotlib.pyplot as plt
 from mpctools.tools import DiscreteSimulator
@@ -14,27 +15,28 @@ b = g["y"]
 c = g["uref"]
 
 Delta = 0.05; #sampling time
-Nt = 20; #Time horizon  
-Ntu = 3; #Control horizon
+Nt = 5; #Time horizon  
+Ntu = 1; #Control horizon
 Nx = 3 # 3 states (lateral position, yaw angle and angular position)
 Nu = 1 #1 control (steering angle)
 
-Q_y = 20
+Q_y = 10
 Q_phi = 1
-Q_r = 0.01
+Q_r = 0
 
-R1 = 0.01
+R = 0.01
+R_du = 0
 Q = np.eye(Nx)
 Q[0,0] = Q_y
 Q[1,1] = Q_phi
 Q[2,2] = Q_r
-R = R1
-delta_max = 20;
+
+delta_max = 0.3491;
 delta_min = -delta_max;
 
 ar = -23.55
 br = 61.99
-uref = np.mean(c)
+uref = c.mean()
 #model
 Ac = np.array(([0,uref,0],[0,0,1],[0,0,ar]))
 Bc = np.array(([0],[0],[br]))
@@ -54,7 +56,7 @@ p = np.zeros((Nt,(Nx+Nu))) #Nt lines, Nx+Nu columms
 
 #stage cost
 def lfunc(x,u,p,du):
-    return (x-p[:Nx]).T@Q@(x-p[:Nx]) + R*(u-p[Nx:Nu+Nx])**2 + R*(du)**2
+    return (x-p[:Nx]).T@Q@(x-p[:Nx]) + R*(u-p[Nx:Nu+Nx])**2 + R_du*(du)**2
 largs = ["x","u","p","Du"]     
 l = mpc.getCasadiFunc(lfunc,[Nx,Nu,(Nx+Nu),Nu],largs, funcname = "l") 
 funcargs = {"l": largs}
@@ -84,7 +86,7 @@ model = mpc.DiscreteSimulator(fsim,Delta,[Nx,Nu], ["x","u"])
 
 #simulate
 
-Nsim = 500
+Nsim = a.size
 times = Delta*Nsim*np.linspace(0,1,Nsim+1)
 x = np.zeros((Nsim+1,Nx))
 x[0,:] = x0
@@ -94,29 +96,36 @@ upred = []
 avgt = np.array([0])
 main_loop = time()  # return time in sec
 par = np.zeros((Nx+Nu,Nt,Nsim))
+mean_y = 0
+mean_phi = 0
+mean_r = 0
+mean_delta = 0
+
 for t in range(Nsim):
     for k in range(Nt):
-            if(t+k > 499):
-                p[k,0] = b[499] #y_ref
-                p[k,1] = np.arctan2(b[499],a[499]) #phi_ref
-            else:
-                p[k,0] = b[k+t] #y_ref
-                p[k,1] = np.arctan2(b[k+t],a[k+t]) #phi_ref
-            if(t+k < 2):
-                phi_ref_plus = np.arctan2(b[k+1+t],a[k+1+t])
-                phi_ref_plus2 = np.arctan2(b[k+2+t],a[k+2+t])
-                p[k,2] = (phi_ref_plus - p[k,1])/Delta  #r_ref = (phi_ref+ - phi_ref)/Delta 
-                p[k,3] = (((phi_ref_plus2 - 2*phi_ref_plus + p[k,1])/Delta**2) - ar*p[k,2])/br
-            elif(t+k > 497):
-                p[k,2] = (p[k,1] - par[1,k,t-1])/Delta  #r_ref = (phi_ref - phi_ref-)/Delta 
-                p[k,3] = (((p[k,1] - 2*par[1,k,t-1] + par[1,k-1,t-1])/Delta**2) - ar*p[k,2])/br
-            else:
-                phi_ref_plus = np.arctan2(b[k+1+t],a[k+1+t])
-                p[k,2] = (phi_ref_plus - par[1,k,t-1])/(2*Delta)  #r_ref = (phi_ref+ - phi_ref-)/2*Delta
-                #delta_ref = (d/dx(r_ref) - ar*r_ref)/br
-                p[k,3] = (((phi_ref_plus - 2*p[k,1] + par[1,k,t-1])/Delta**2) - ar*p[k,2])/br 
-            par[:,k,t] = p[k,:]
-for t in range(Nsim):
+        if(t+k > Nsim-1):
+            p[k,0] = b[Nsim-1] #y_ref
+            p[k,1] = np.arctan2(b[Nsim-1]-b[Nsim-2],a[Nsim-1]-a[Nsim-2]) #phi_ref
+        elif(t + k == 0):
+            p[k,0] = b[k+t] #y_ref
+            p[k,1] = 0 #phi_ref
+        else:
+            p[k,0] = b[k+t] #y_ref
+            p[k,1] = np.arctan2(b[k+t]-b[k+t-1],a[k+t]-a[k+t-1]) #phi_ref
+        if(t+k < 2):
+            phi_ref_plus = np.arctan2(b[k+1+t]-b[k+t],a[k+1+t]-a[k+t])
+            phi_ref_plus2 = np.arctan2(b[k+2+t]-b[k+1+t],a[k+2+t]-a[k+1+t])
+            p[k,2] = (phi_ref_plus - p[k,1])/Delta  #r_ref = (phi_ref+ - phi_ref)/Delta 
+            p[k,3] = (((phi_ref_plus2 - 2*phi_ref_plus + p[k,1])/Delta**2) - ar*p[k,2])/br
+        elif(t+k > Nsim-3):
+            p[k,2] = (p[k,1] - par[1,k,t-1])/Delta  #r_ref = (phi_ref - phi_ref-)/Delta 
+            p[k,3] = (((p[k,1] - 2*par[1,k,t-1] + par[1,k-1,t-1])/Delta**2) - ar*p[k,2])/br
+        else:
+            phi_ref_plus = np.arctan2(b[k+1+t]-b[k+t],a[k+1+t]-a[k+t])
+            p[k,2] = (phi_ref_plus - par[1,k,t-1])/(2*Delta)  #r_ref = (phi_ref+ - phi_ref-)/2*Delta
+            #delta_ref = (d/dx(r_ref) - ar*r_ref)/br
+            p[k,3] = (((phi_ref_plus - 2*p[k,1] + par[1,k,t-1])/Delta**2) - ar*p[k,2])/br 
+        par[:,k,t] = p[k,:]       
     # Fix initial state.
     
     #<<ENDCHUNK>>    
@@ -148,6 +157,10 @@ for t in range(Nsim):
         avgt,
         t2-t1
     ))
+    mean_y = mean_y + ((x[t,0]-par[0,0,t])**2)/Nsim
+    mean_phi = mean_phi + ((x[t,1]-par[1,0,t])**2)/Nsim
+    mean_r = mean_r + ((x[t,2]-par[2,0,t])**2)/Nsim
+    mean_delta = mean_delta + ((u[t]-par[3,0,t])**2)/Nsim
 main_loop_time = time()
 pred2 = []
 pred3 = []    
@@ -182,11 +195,26 @@ for n in range(Nsim):
         pred4[n,k,0] = uref*Delta*(n+k)
         pred4[n,k,1] = pred3[n,k,0]
         pred4[n,k,2] = pred3[n,k,1]
-xp = []
-yp = []
+xz = []
+yz = []
+
 for n in range(Nsim):
-    xp += [uref*Delta*n]
-    yp += [x[n,0]]
+    if(n == 0):
+        xz += [0]
+    else:        
+        xz += [xz[n-1] + uref*np.cos(x[t,1])*Delta]
+    yz += [x[n,0]]    
+#print(mean_y*(1/(3**2)))
+#print(mean_phi*(1/(1.5**2)))
+#print(mean_r*(1/(0.35**2)))
+#print(mean_delta*(1/(0.1**2)))
+traj = np.array([xz,yz])
+traje = np.array([a,b])
+mean_t = 0 
+dist = np.linalg.norm(-b)    
+for k in range(Nsim):
+    mean_t = mean_t + np.linalg.norm(traj[:,k]-traje[:,k])/Nsim
+print(mean_t)    
 fig, axs = plt.subplots(3, 2)
 axs[0, 0].plot(times,x[:,0], label ='actual')
 axs[0, 0].plot(times[:-1],par[0,0,:], label ='reference')
@@ -198,21 +226,21 @@ axs[1, 0].plot(times[:-1],par[1,0,:],label ='reference')
 axs[1, 0].set_ylabel("Yaw angle")
 axs[1, 0].set_xlabel("t[s]")
 axs[1, 0].legend()
-axs[1, 1].plot(times,x[:,2], label ='actual')
-axs[1, 1].plot(times[:-1],par[2,0,:], label ='reference')
-axs[1, 1].set_ylabel("Yaw rate")
-axs[1, 1].set_xlabel("t[s]")
-axs[1, 1].legend()
+axs[2, 0].plot(times,x[:,2], label ='actual')
+axs[2, 0].plot(times[:-1],par[2,0,:], label ='reference')
+axs[2, 0].set_ylabel("Yaw rate")
+axs[2, 0].set_xlabel("t[s]")
+axs[2, 0].legend()
 axs[0, 1].step(times[:-1],u, label ='actual')
 axs[0, 1].plot(times[:-1],par[3,0,:], label ='reference')
 axs[0, 1].set_ylabel("Steering angle")
 axs[0, 1].set_xlabel("t[s]")
-axs[0, 1].legend()
-axs[2, 0].plot(xp,yp, label = 'actual trajectory')
-axs[2, 0].plot(a,b, label = 'reference trajectory')
-axs[2, 0].set_ylabel("y[m]")
-axs[2, 0].set_xlabel("x[m]")
-axs[2, 0].legend()
+axs[1, 1].legend()
+axs[1, 1].plot(xz,yz, label = 'actual trajectory')
+axs[1, 1].plot(a,b, label = 'reference trajectory')
+axs[1, 1].set_ylabel("y[m]")
+axs[1, 1].set_xlabel("x[m]")
+axs[1, 1].legend()
 axs[2,1].set_visible(False)
 
 manager = plt.get_current_fig_manager()
@@ -227,7 +255,7 @@ manager.resize(*manager.window.maxsize())
 #plt.plot(times,x[:,0])
 #plt.plot(times[:-1],par[0,0,:])
 plt.show()
-plt.savefig(fname = 'LTI.png',bbox_inches='tight')
+#plt.savefig(fname = 'LTI.png',bbox_inches='tight')
 #simulate(pred4.T, upred3.T, times, Delta, Nt,
 #              np.array([0, 0, 0, 50, 50, 0]), save=False)
 
